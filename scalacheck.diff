@@ -1,0 +1,155 @@
+diff --git a/core/js/src/main/scala/org/scalacheck/Platform.scala b/core/js/src/main/scala/org/scalacheck/Platform.scala
+index 38c5420..78cd739 100644
+--- a/core/js/src/main/scala/org/scalacheck/Platform.scala
++++ b/core/js/src/main/scala/org/scalacheck/Platform.scala
+@@ -17,9 +17,9 @@ private[scalacheck] object Platform {
+ 
+   def runWorkers(
+     params: Parameters,
+-    workerFun: Int => Result,
++    workerFun: Int => Result|Null,
+     stop: () => Unit
+-  ): Result = {
++  ): Result|Null = {
+     workerFun(0)
+   }
+ 
+diff --git a/core/native/src/main/scala/org/scalacheck/Platform.scala b/core/native/src/main/scala/org/scalacheck/Platform.scala
+index b33e3c8..ef8d9ae 100644
+--- a/core/native/src/main/scala/org/scalacheck/Platform.scala
++++ b/core/native/src/main/scala/org/scalacheck/Platform.scala
+@@ -17,7 +17,7 @@ private[scalacheck] object Platform {
+ 
+   def runWorkers(
+     params: Parameters,
+-    workerFun: Int => Result,
++    workerFun: Int => Result|Null,
+     stop: () => Unit
+   ): Result = {
+     workerFun(0)
+diff --git a/core/shared/src/main/scala/org/scalacheck/Prop.scala b/core/shared/src/main/scala/org/scalacheck/Prop.scala
+index 4f88f23..ccea44d 100644
+--- a/core/shared/src/main/scala/org/scalacheck/Prop.scala
++++ b/core/shared/src/main/scala/org/scalacheck/Prop.scala
+@@ -296,7 +296,7 @@ object Prop {
+   case object Undecided extends Status
+ 
+   /** Evaluating the property raised an exception */
+-  sealed case class Exception(e: Throwable) extends Status {
++  sealed case class Exception(e: Throwable|Null) extends Status {
+     override def equals(o: Any) = o match {
+       case Exception(_) => true
+       case _ => false
+@@ -386,7 +386,7 @@ object Prop {
+   lazy val passed = Prop(Result(status = True))
+ 
+   /** A property that denotes an exception */
+-  def exception(e: Throwable): Prop = Prop(Result(status = Exception(e)))
++  def exception(e: Throwable|Null): Prop = Prop(Result(status = Exception(e)))
+ 
+   /** A property that denotes an exception */
+   lazy val exception: Prop = exception(null)
+diff --git a/core/shared/src/main/scala/org/scalacheck/Test.scala b/core/shared/src/main/scala/org/scalacheck/Test.scala
+index 99ec5d0..25dd992 100644
+--- a/core/shared/src/main/scala/org/scalacheck/Test.scala
++++ b/core/shared/src/main/scala/org/scalacheck/Test.scala
+@@ -245,7 +245,7 @@ object Test {
+   /** An exception was raised when trying to evaluate the property with the
+    *  given concrete arguments. If an exception was raised before or during
+    *  argument generation, the argument list will be empty. */
+-  sealed case class PropException(args: List[Arg[Any]], e: Throwable,
++  sealed case class PropException(args: List[Arg[Any]], e: Throwable|Null,
+     labels: Set[String]) extends Status
+ 
+   trait TestCallback { self =>
+@@ -407,11 +407,12 @@ object Test {
+     val sizeStep = (params.maxSize - params.minSize) / (iterations * params.workers)
+     var stop = false
+ 
+-    def workerFun(workerIdx: Int): Result = {
++    def workerFun(workerIdx: Int): Result= {
+       var n = 0  // passed tests
+       var d = 0  // discarded tests
+-      var res: Result = null
++      var res: Result|Null = null
+       var fm = FreqMap.empty[Set[Any]]
++      var res2: Result = Result(Exhausted, n, d, fm)
+ 
+       def isExhausted = d > params.minSuccessfulTests * params.maxDiscardRatio
+ 
+@@ -440,26 +441,34 @@ object Test {
+           case Prop.Undecided =>
+             d += 1
+             params.testCallback.onPropEval("", workerIdx, n, d)
+-            if (isExhausted) res = Result(Exhausted, n, d, fm)
++            if (isExhausted){
++              res = Result(Exhausted, n, d, fm)
++              res2= Result(Exhausted, n, d, fm)
++            }
+           case Prop.True =>
+             n += 1
+             params.testCallback.onPropEval("", workerIdx, n, d)
+           case Prop.Proof =>
+             n += 1
+             res = Result(Proved(propRes.args), n, d, fm)
++            res2 = Result(Proved(propRes.args), n, d, fm)
+             stop = true
+           case Prop.False =>
+             res = Result(Failed(propRes.args,propRes.labels), n, d, fm)
++            res2 = Result(Failed(propRes.args,propRes.labels), n, d, fm)
+             stop = true
+           case Prop.Exception(e) =>
+             res = Result(PropException(propRes.args,e,propRes.labels), n, d, fm)
++            res2 = Result(PropException(propRes.args,e,propRes.labels), n, d, fm)
+             stop = true
+         }
+       }
+       if (res == null) {
+         if (isExhausted) Result(Exhausted, n, d, fm)
+         else Result(Passed, n, d, fm)
+-      } else res
++      } else {
++        res2
++      }
+     }
+ 
+     val t0 = System.nanoTime()
+diff --git a/core/shared/src/main/scala/org/scalacheck/util/CmdLineParser.scala b/core/shared/src/main/scala/org/scalacheck/util/CmdLineParser.scala
+index 997a49f..0986de1 100644
+--- a/core/shared/src/main/scala/org/scalacheck/util/CmdLineParser.scala
++++ b/core/shared/src/main/scala/org/scalacheck/util/CmdLineParser.scala
+@@ -35,18 +35,18 @@ private[scalacheck] trait CmdLineParser {
+ 
+   val opts: Set[Opt[_]]
+ 
+-  private def getOpt(s: String) = {
++  private def getOpt(s: String|Null) = {
+     if(s == null || s.length == 0 || s.charAt(0) != '-') None
+     else opts.find(_.names.contains(s.drop(1)))
+   }
+ 
+   private def getStr(s: String) = Some(s)
+ 
+-  private def getInt(s: String) =
++  private def getInt(s: String|Null) =
+     if (s != null && s.length > 0 && s.forall(_.isDigit)) Some(s.toInt)
+     else None
+ 
+-  private def getFloat(s: String) =
++  private def getFloat(s: String|Null) =
+     if (s != null && s.matches("[0987654321]+\\.?[0987654321]*")) Some(s.toFloat)
+     else None
+ 
+diff --git a/core/shared/src/main/scala/org/scalacheck/util/Pretty.scala b/core/shared/src/main/scala/org/scalacheck/util/Pretty.scala
+index ff00a04..ff7f590 100644
+--- a/core/shared/src/main/scala/org/scalacheck/util/Pretty.scala
++++ b/core/shared/src/main/scala/org/scalacheck/util/Pretty.scala
+@@ -32,7 +32,7 @@ object Pretty {
+ 
+   def apply(f: Params => String): Pretty = new Pretty { def apply(p: Params) = f(p) }
+ 
+-  def pretty[T](t: T, prms: Params)(implicit ev: T => Pretty): String = {
++  def pretty[T](t: T, prms: Params)(implicit ev: T => Pretty|Null): String = {
+     val p = ev(t) match {
+       case null => prettyAny(null)
+       case p => p

@@ -32,7 +32,7 @@ object Pretty {
 
   def apply(f: Params => String): Pretty = new Pretty { def apply(p: Params) = f(p) }
 
-  def pretty[T](t: T, prms: Params)(implicit ev: T => Pretty): String = {
+  def pretty[T](t: T, prms: Params)(implicit ev: T => Pretty|Null): String = {
     val p = ev(t) match {
       case null => prettyAny(null)
       case p => p

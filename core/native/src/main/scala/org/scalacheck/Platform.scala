@@ -17,7 +17,7 @@ private[scalacheck] object Platform {
 
   def runWorkers(
     params: Parameters,
-    workerFun: Int => Result,
+    workerFun: Int => Result|Null,
     stop: () => Unit
   ): Result = {
     workerFun(0)

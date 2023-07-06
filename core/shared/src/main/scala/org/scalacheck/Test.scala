@@ -245,7 +245,7 @@ object Test {
   /** An exception was raised when trying to evaluate the property with the
    *  given concrete arguments. If an exception was raised before or during
    *  argument generation, the argument list will be empty. */
-  sealed case class PropException(args: List[Arg[Any]], e: Throwable,
+  sealed case class PropException(args: List[Arg[Any]], e: Throwable|Null,
     labels: Set[String]) extends Status
 
   trait TestCallback { self =>
@@ -407,11 +407,12 @@ object Test {
     val sizeStep = (params.maxSize - params.minSize) / (iterations * params.workers)
     var stop = false
 
-    def workerFun(workerIdx: Int): Result = {
+    def workerFun(workerIdx: Int): Result= {
       var n = 0  // passed tests
       var d = 0  // discarded tests
-      var res: Result = null
+      var res: Result|Null = null
       var fm = FreqMap.empty[Set[Any]]
+      var res2: Result = Result(Exhausted, n, d, fm)
 
       def isExhausted = d > params.minSuccessfulTests * params.maxDiscardRatio
 
@@ -440,26 +441,34 @@ object Test {
           case Prop.Undecided =>
             d += 1
             params.testCallback.onPropEval("", workerIdx, n, d)
-            if (isExhausted) res = Result(Exhausted, n, d, fm)
+            if (isExhausted){
+              res = Result(Exhausted, n, d, fm)
+              res2= Result(Exhausted, n, d, fm)
+            }
           case Prop.True =>
             n += 1
             params.testCallback.onPropEval("", workerIdx, n, d)
           case Prop.Proof =>
             n += 1
             res = Result(Proved(propRes.args), n, d, fm)
+            res2 = Result(Proved(propRes.args), n, d, fm)
             stop = true
           case Prop.False =>
             res = Result(Failed(propRes.args,propRes.labels), n, d, fm)
+            res2 = Result(Failed(propRes.args,propRes.labels), n, d, fm)
             stop = true
           case Prop.Exception(e) =>
             res = Result(PropException(propRes.args,e,propRes.labels), n, d, fm)
+            res2 = Result(PropException(propRes.args,e,propRes.labels), n, d, fm)
             stop = true
         }
       }
       if (res == null) {
         if (isExhausted) Result(Exhausted, n, d, fm)
         else Result(Passed, n, d, fm)
-      } else res
+      } else {
+        res2
+      }
     }
 
     val t0 = System.nanoTime()
